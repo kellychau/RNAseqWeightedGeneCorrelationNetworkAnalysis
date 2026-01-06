@@ -1,0 +1,893 @@
+---
+title: "ConsensusPlacentaComparisonPCBOnly"
+output: html_document
+date: "2023-08-30"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Display the current working directory
+getwd();
+# If necessary, change the path below to the directory where the data files are stored.
+# "." means current directory. On Windows use a forward slash / instead of the usual \.
+workingDir = ".";
+setwd(workingDir);
+# Load the package
+library(WGCNA);
+# The following setting is important, do not omit.
+options(stringsAsFactors = FALSE);
+library(readxl)
+F_Placenta <- read_excel("/Users/kchau/Documents/PEBBLES/RNA-seq_ComparisonPlacenta_PCBonly/F_Placenta_voomLogCPMforWGCNA copy.xlsx")
+F_Placenta <- F_Placenta[!grepl("BRAIN", colnames(F_Placenta))]
+M_Placenta <- read_excel("/Users/kchau/Documents/PEBBLES/RNA-seq_ComparisonPlacenta_PCBonly/M_Placenta_ComparisonPCBonlyvoomLogCPMforWGCNA copy.xlsx")
+M_Placenta <- M_Placenta[!grepl("BRAIN", colnames(M_Placenta))]
+# Take a quick look at what is in the data sets (caution, longish output):
+dim(F_Placenta)
+names(F_Placenta)
+dim(M_Placenta)
+names(M_Placenta)
+```
+
+```{r}
+intersectedgenes <- intersect(rownames(F_Placenta), rownames(M_Placenta))
+F_Placenta1 <- F_Placenta[intersectedgenes, ]
+F_Placenta1 <- F_Placenta1[, -c(6:15, 26:35)]
+M_Placenta1 <- M_Placenta[intersectedgenes, ]
+#M_Placenta1 <- M_Placenta[, -c(8:15, 21:30)]
+names(F_Placenta1)
+names(M_Placenta1)
+```
+
+
+```{r}
+# We work with two sets:
+nSets = 2;
+# For easier labeling of plots, create a vector holding descriptive names of the two sets.
+setLabels = c("Female Placenta", "Male Placenta")
+shortLabels = c("Female", "Male")
+# Form multi-set expression data: columns starting from 9 contain actual expression data.
+multiExpr = vector(mode = "list", length = nSets)
+multiExpr[[1]] = list(data = as.data.frame(t(F_Placenta1[-c(1:1)])));
+names(multiExpr[[1]]$data) = F_Placenta1$Gene;
+rownames(multiExpr[[1]]$data) = names(F_Placenta1)[-c(1:1)];
+multiExpr[[2]] = list(data = as.data.frame(t(M_Placenta1[-c(1:1)])));
+names(multiExpr[[2]]$data) = M_Placenta1$Gene;
+rownames(multiExpr[[2]]$data) = names(M_Placenta1)[-c(1:1)];
+```
+
+```{r}
+# Check that the data has the correct format for many functions operating on multiple sets:
+exprSize = checkSets(multiExpr)
+```
+
+```{r}
+# Check that all genes and samples have sufficiently low numbers of missing values.
+gsg = goodSamplesGenesMS(multiExpr, verbose = 3);
+gsg$allOK
+```
+
+```{r}
+if (!gsg$allOK)
+{
+# Print information about the removed genes:
+if (sum(!gsg$goodGenes) > 0)
+printFlush(paste("Removing genes:", paste(names(multiExpr[[1]]$data)[!gsg$goodGenes],
+collapse = ", ")))
+for (set in 1:exprSize$nSets)
+{
+if (sum(!gsg$goodSamples[[set]]))
+printFlush(paste("In set", setLabels[set], "removing samples",
+paste(rownames(multiExpr[[set]]$data)[!gsg$goodSamples[[set]]], collapse = ", ")))
+# Remove the offending genes and samples
+multiExpr[[set]]$data = multiExpr[[set]]$data[gsg$goodSamples[[set]], gsg$goodGenes];
+}
+# Update exprSize
+exprSize = checkSets(multiExpr)
+}
+```
+
+```{r}
+sampleTrees = list()
+for (set in 1:nSets)
+{
+sampleTrees[[set]] = hclust(dist(multiExpr[[set]]$data), method = "average")
+}
+# dist_female <- dist(multiExpr[[1]]$data)
+# dist_male <- dist(multiExpr[[2]]$data)
+```
+
+
+```{r}
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/PlacentaSampleClustering.pdf", width = 12, height = 12);
+par(mfrow=c(2,1))
+par(mar = c(0, 4, 2, 0))
+for (set in 1:nSets)
+plot(sampleTrees[[set]], main = paste("Sample clustering on all genes in", setLabels[set]),
+xlab="", sub="", cex = 0.7);
+dev.off()
+```
+
+```{r}
+# Choose the "base" cut height for the female data set
+baseHeight = 75
+# Adjust the cut height for the male data set for the number of samples
+cutHeights = c(75, 75*exprSize$nSamples[2]/exprSize$nSamples[1]);
+#cutHeights = c(60, 100);
+# Re-plot the dendrograms including the cut lines
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/PlacentaSampleClusteringCutoff.pdf", width = 12, height = 12);
+par(mfrow=c(2,1))
+par(mar = c(0, 4, 2, 0))
+for (set in 1:nSets)
+{
+plot(sampleTrees[[set]], main = paste("Sample clustering on all genes in", setLabels[set]),
+xlab="", sub="", cex = 0.7);
+abline(h=cutHeights[set], col = "red");
+}
+dev.off()
+```
+
+
+```{r}
+collectGarbage();
+# Check the size of the leftover data
+exprSize = checkSets(multiExpr)
+exprSize
+```
+
+```{r}
+traitData = read_excel("/Users/kchau/Documents/PEBBLES/sampletraits/sample_info_restored_M_F_Placenta_copy_combinations.xlsx")
+#traitData <- traitData[-c(97:999),]
+#traitData <- traitData[!grepl("PLAC", traitData$Name),]
+traitData <- traitData[-c(59:96), ]
+dim(traitData)
+names(traitData)
+```
+
+```{r}
+#remove Folic Acid column
+traitData <- traitData[ , -2] 
+traitData <- traitData[, -9]
+#allTraits = traitData[, c(1, 5, 7, 8)]
+allTraits = traitData
+#allTraits = allTraits[, -2]
+
+
+# See how big the traits are and what are the trait and sample names
+dim(allTraits)
+names(allTraits)
+allTraits$Name
+```
+
+```{r}
+# Form a multi-set structure that will hold the clinical traits.
+Traits = vector(mode="list", length = nSets);
+for (set in 1:nSets)
+{
+print(set)
+setSamples = rownames(multiExpr[[set]]$data);
+#traitRows = match(setSamples, traitData$Name);
+traitRows = match(setSamples, allTraits$Name);
+Traits[[set]] = list(data = allTraits[traitRows, -1]);
+#rownames(Traits[[set]]$data) = as.data.frame(traitData)[traitRows, 1];
+rownames(Traits[[set]]$data) = as.data.frame(allTraits)[traitRows, 1];
+#rownames(Traits[[set]]$data) = traitData[traitRows, 1];
+#rownames(Traits[[set]]$data) = allTraits[traitRows, 1]
+}
+collectGarbage();
+# Define data set dimensions
+nGenes = exprSize$nGenes;
+nSamples = exprSize$nSamples
+```
+
+```{r}
+# Choose a set of soft-thresholding powers
+powers = c(seq(4,10,by=1), seq(12,20, by=2));
+# Initialize a list to hold the results of scale-free analysis
+powerTables = vector(mode = "list", length = nSets);
+# Call the network topology analysis function for each set in turn
+for (set in 1:nSets)
+powerTables[[set]] = list(data = pickSoftThreshold(multiExpr[[set]]$data, powerVector=powers,
+verbose = 2)[[2]]);
+collectGarbage();
+# Plot the results:
+colors = c("black", "red")
+# Will plot these columns of the returned scale free analysis tables
+plotCols = c(2,5,6,7)
+colNames = c("Scale Free Topology Model Fit", "Mean connectivity", "Median connectivity",
+"Max connectivity");
+# Get the minima and maxima of the plotted points
+ylim = matrix(NA, nrow = 2, ncol = 4);
+for (set in 1:nSets)
+{
+for (col in 1:length(plotCols))
+{
+ylim[1, col] = min(ylim[1, col], powerTables[[set]]$data[, plotCols[col]], na.rm = TRUE);
+ylim[2, col] = max(ylim[2, col], powerTables[[set]]$data[, plotCols[col]], na.rm = TRUE);
+}
+}
+# Plot the quantities in the chosen columns vs. the soft thresholding power
+sizeGrWindow(8, 6)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/placenta_scaleFreeAnalysis.pdf", wi = 8, he = 6)
+par(mfcol = c(2,2));
+par(mar = c(4.2, 4.2 , 2.2, 0.5))
+cex1 = 0.7;
+for (col in 1:length(plotCols)) for (set in 1:nSets)
+{
+if (set==1)
+{
+plot(powerTables[[set]]$data[,1], -sign(powerTables[[set]]$data[,3])*powerTables[[set]]$data[,2],
+xlab="Soft Threshold (power)",ylab=colNames[col],type="n", ylim = ylim[, col],
+main = colNames[col]);
+addGrid();
+}
+if (col==1)
+{
+text(powerTables[[set]]$data[,1], -sign(powerTables[[set]]$data[,3])*powerTables[[set]]$data[,2],
+labels=powers,cex=cex1,col=colors[set]);
+} else
+text(powerTables[[set]]$data[,1], powerTables[[set]]$data[,plotCols[col]],
+labels=powers,cex=cex1,col=colors[set]);
+if (col==1)
+{
+legend("bottomright", legend = setLabels, col = colors, pch = 20) ;
+} else
+legend("topright", legend = setLabels, col = colors, pch = 20) ;
+}
+dev.off();
+```
+
+
+```{r}
+bnet = blockwiseConsensusModules(
+multiExpr, maxBlockSize = nGenes, power = 18, minModuleSize = 150,
+corType = "bicor", 
+networkType = "signed",
+TOMType = "signed",
+deepSplit = 2,
+pamRespectsDendro = FALSE,
+mergeCutHeight = 0.25, numericLabels = TRUE,
+minKMEtoStay = 0,
+saveTOMs = TRUE, verbose = 5)
+```
+
+```{r}
+names(bnet)
+```
+
+```{r}
+consMEs = bnet$multiMEs;
+moduleLabels = bnet$colors;
+# Convert the numeric labels to color labels
+moduleColors = labels2colors(moduleLabels)
+consTree = bnet$dendrograms[[1]]
+```
+
+```{r}
+# Here we show a more flexible way of plotting several trees and colors on one page
+sizeGrWindow(12,6)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/placenta_BlockwiseGeneDendrosAndColors.pdf", wi = 12, he = 6);
+# Use the layout function for more involved screen sectioning
+layout(matrix(c(1:4), 2, 2), heights = c(0.8, 0.2), widths = c(1,1))
+#layout.show(4);
+nBlocks = length(bnet$dendrograms)
+# Plot the dendrogram and the module colors underneath for each block
+for (block in 1:nBlocks)
+plotDendroAndColors(bnet$dendrograms[[block]], moduleColors[bnet$blockGenes[[block]]],
+"Module colors",
+main = paste("Consensus Placenta: Gene dendrogram and module colors in block", block),
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05,
+setLayout = FALSE)
+dev.off()
+```
+
+```{r}
+#find number of modules
+table(bnet$colors)
+```
+
+
+```{r}
+# Set up variables to contain the module-trait correlations
+moduleTraitCor = list();
+moduleTraitPvalue = list();
+# Calculate the correlations
+for (set in 1:nSets)
+{
+moduleTraitCor[[set]] = cor(consMEs[[set]]$data, Traits[[set]]$data, use = "p", method = 'spearman');
+moduleTraitPvalue[[set]] = corPvalueFisher(moduleTraitCor[[set]], exprSize$nSamples[set]);
+}
+```
+
+
+```{r}
+# Convert numerical lables to colors for labeling of modules in the plot
+MEColors = labels2colors(as.numeric(substring(names(consMEs[[1]]$data), 3)));
+MEColorNames = paste("ME", MEColors, sep="");
+# Open a suitably sized window (the user should change the window size if necessary)
+sizeGrWindow(8,5)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/placentaModuleTraitRelationships_bicor-female.pdf", wi = 8, he = 10);
+# Plot the module-trait relationship table for set number 1
+set = 1
+textMatrix = paste(signif(moduleTraitCor[[set]], 2), "\n(",
+signif(moduleTraitPvalue[[set]], 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor[[set]])
+par(mar = c(6, 8.8, 3, 2.2));
+labeledHeatmap(Matrix = moduleTraitCor[[set]],
+xLabels = names(Traits[[set]]$data),
+yLabels = MEColorNames,
+ySymbols = MEColorNames,
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.8,
+zlim = c(-1,1),
+verticalSeparator.lwd = 2,
+main = paste("ConsensusModule--trait relationships in", setLabels[set]))
+dev.off();
+# Plot the module-trait relationship table for set number 2
+set = 2
+textMatrix = paste(signif(moduleTraitCor[[set]], 2), "\n(",
+signif(moduleTraitPvalue[[set]], 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor[[set]])
+sizeGrWindow(8,5)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/placentaModuleTraitRelationships_bicor-male.pdf", wi = 8, he = 10);
+par(mar = c(6, 8.8, 3, 2.2));
+labeledHeatmap(Matrix = moduleTraitCor[[set]],
+xLabels = names(Traits[[set]]$data),
+yLabels = MEColorNames,
+ySymbols = MEColorNames,
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.8,
+zlim = c(-1,1),
+main = paste("ConsensusModule--trait relationships in", setLabels[set]))
+dev.off()
+```
+
+
+```{r}
+# Initialize matrices to hold the consensus correlation and p-value
+consensusCor = matrix(NA, nrow(moduleTraitCor[[1]]), ncol(moduleTraitCor[[1]]));
+consensusPvalue = matrix(NA, nrow(moduleTraitCor[[1]]), ncol(moduleTraitCor[[1]]));
+# Find consensus negative correlations
+negative = moduleTraitCor[[1]] < 0 & moduleTraitCor[[2]] < 0;
+consensusCor[negative] = pmax(moduleTraitCor[[1]][negative], moduleTraitCor[[2]][negative]);
+consensusPvalue[negative] = pmax(moduleTraitPvalue[[1]][negative], moduleTraitPvalue[[2]][negative]);
+# Find consensus positive correlations
+positive = moduleTraitCor[[1]] > 0 & moduleTraitCor[[2]] > 0;
+consensusCor[positive] = pmin(moduleTraitCor[[1]][positive], moduleTraitCor[[2]][positive]);
+consensusPvalue[positive] = pmax(moduleTraitPvalue[[1]][positive], moduleTraitPvalue[[2]][positive])
+```
+
+```{r}
+textMatrix = paste(signif(consensusCor, 2), "\n(",
+signif(consensusPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(moduleTraitCor[[set]])
+sizeGrWindow(10,7)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/ModuleTraitRelationships_bicor-consensus.pdf", wi = 8, he = 10);
+par(mar = c(6, 8.8, 3, 2.2));
+labeledHeatmap(Matrix = consensusCor,
+xLabels = names(Traits[[set]]$data),
+yLabels = MEColorNames,
+ySymbols = MEColorNames,
+colorLabels = FALSE,
+colors = blueWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.8,
+zlim = c(-1,1),
+main = paste("Consensus module--trait relationships across\n",
+paste(setLabels, collapse = " and ")))
+```
+
+```{r}
+# Create a variable that will hold just the PCB dose of mice in both sets
+PCBdose = vector(mode = "list", length = nSets);
+for (set in 1:nSets)
+{
+PCBdose[[set]] = list(data = as.data.frame(Traits[[set]]$data$PCB_dose));
+names(PCBdose[[set]]$data) = "PCBdose"
+}
+# Recalculate consMEs to give them color names
+consMEsC = multiSetMEs(multiExpr, universalColors = moduleColors);
+# We add the weight trait to the eigengenes and order them by consesus hierarchical clustering:
+MET = consensusOrderMEs(addTraitToMEs(consMEsC, PCBdose))
+```
+
+```{r}
+sizeGrWindow(8,10);
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/EigengeneNetworks.pdf", width= 15, height = 16);
+par(cex = 1)
+plotEigengeneNetworks(MET, setLabels, marDendro = c(0,2,2,1), marHeatmap = c(7,7,7,7), setMargins = TRUE,
+zlimPreservation = c(0.5, 1), xLabelsAngle = 90)
+dev.off()
+```
+
+
+```{r}
+#find number of genes in each module
+genes_per_module <- table(moduleColors)
+```
+
+```{r}
+library(data.table)
+library(dplyr)
+library(formattable)
+library(tidyr)
+```
+
+```{r}
+#orders from lowest number of genes to highest
+genes_per_module <- arrange(data.frame(genes_per_module), Freq)
+
+formattable(genes_per_module)
+knitr::kable(genes_per_module, format = "html", col.names = c("Module", "Number of Genes"))
+
+```
+
+
+
+```{r}
+library("AnnotationDbi")
+library("org.Mm.eg.db")
+#columns(org.Mm.eg.db) # returns list of available keytypes
+F_Placenta1$entrez = mapIds(org.Mm.eg.db,
+                    keys=F_Placenta1$Gene, #Column containing Ensembl gene ids
+                    column="ENTREZID",
+                    keytype="ENSEMBL",
+                    multiVals="first")
+```
+
+
+```{r}
+#library("AnnotationDbi")
+#library("org.Mm.eg.db")
+#columns(org.Mm.eg.db) # returns list of available keytypes
+M_Placenta1$entrez = mapIds(org.Mm.eg.db,
+                    keys=M_Placenta1$Gene, #Column containing Ensembl gene ids
+                    column="ENTREZID",
+                    keytype="ENSEMBL",
+                    multiVals="first")
+```
+
+#For Consensus GO terms
+```{r}
+consMEs.unord = multiSetMEs(multiExpr, universalColors = moduleLabels, excludeGrey = TRUE)
+GS = list();
+kME = list();
+for (set in 1:nSets)
+{
+GS[[set]] = corAndPvalue(multiExpr[[set]]$data, Traits[[set]]$data);
+kME[[set]] = corAndPvalue(multiExpr[[set]]$data, consMEs.unord[[set]]$data);
+}
+```
+
+```{r}
+GS.metaZ = (GS[[1]]$Z + GS[[2]]$Z)/sqrt(2);
+kME.metaZ = (kME[[1]]$Z + kME[[2]]$Z)/sqrt(2);
+GS.metaP = 2*pnorm(abs(GS.metaZ), lower.tail = FALSE);
+kME.metaP = 2*pnorm(abs(kME.metaZ), lower.tail = FALSE)
+```
+
+```{r}
+GSmat = rbind(GS[[1]]$cor, GS[[2]]$cor, GS[[1]]$p, GS[[2]]$p, GS.metaZ, GS.metaP);
+nTraits = checkSets(Traits)$nGenes
+traitNames = colnames(Traits[[1]]$data)
+dim(GSmat) = c(nGenes, 6*nTraits)
+#rownames(GSmat) = probes;
+rownames(GSmat) = M_Placenta1$Gene;
+colnames(GSmat) = spaste(
+c("GS.set1.", "GS.set2.", "p.GS.set1.", "p.GS.set2.", "Z.GS.meta.", "p.GS.meta"),
+rep(traitNames, rep(6, nTraits)))
+# Same code for kME:
+kMEmat = rbind(kME[[1]]$cor, kME[[2]]$cor, kME[[1]]$p, kME[[2]]$p, kME.metaZ, kME.metaP);
+MEnames = colnames(consMEs.unord[[1]]$data);
+nMEs = checkSets(consMEs.unord)$nGenes
+dim(kMEmat) = c(nGenes, 6*nMEs)
+#rownames(kMEmat) = probes;
+rownames(kMEmat) = M_Placenta1$Gene;
+colnames(kMEmat) = spaste(
+c("kME.set1.", "kME.set2.", "p.kME.set1.", "p.kME.set2.", "Z.kME.meta.", "p.kME.meta"),
+rep(MEnames, rep(6, nMEs)))
+```
+
+```{r}
+info = data.frame(Probe = M_Placenta1$Gene, EntrezID = M_Placenta1$entrez,
+ModuleLabel = moduleLabels,
+ModuleColor = labels2colors(moduleLabels), GSmat, kMEmat);
+write.csv(info, file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/placenta_consensusAnalysis-CombinedNetworkResults.csv",
+row.names = FALSE, quote = FALSE)
+```
+
+
+```{r}
+info <- info[, c(1:4)]
+info$GeneSymbol <- 'NA'
+
+#Convert entrezID to gene symbols using biomart
+library(biomaRt)
+library(dplyr)
+#library(xlsx)
+
+mart <- useDataset("mmusculus_gene_ensembl", useMart("ensembl"))
+#got the probe and gene symbol that matches
+geneSymbols <- getBM(filters = "ensembl_gene_id", attributes= c("ensembl_gene_id", "external_gene_name"), values=info$Probe, mart= mart)
+
+#join the dataframe with moduleinfo by Probe column
+joinGeneSymbol <- left_join(info, geneSymbols, by = c("Probe" = "ensembl_gene_id"))
+```
+
+# ```{r}
+# # identify all meta kME columns
+# kMEcols <- grep("^Z.kME.meta", colnames(info), value = TRUE)
+# 
+# hubTable <- do.call(rbind, lapply(kMEcols, function(colname) {
+# 
+#   # extract ME name (e.g. "ME1")
+#   ME <- sub("^Z.kME.meta.", "", colname)
+# 
+#   # extract meta Z values
+#   zvals <- as.numeric(info[[colname]])
+# 
+#   # genes whose strongest kME is this ME
+#   genesInModule <- apply(
+#     abs(as.matrix(info[, kMEcols])),
+#     1,
+#     function(x) which.max(x) == which(kMEcols == colname)
+#   )
+# 
+#   sub <- info[genesInModule, ]
+# 
+#   if (nrow(sub) == 0) return(NULL)
+# 
+#   sub[which.max(abs(zvals[genesInModule])), ]
+# }))
+```
+
+```{r}
+joinGeneSymbol <- joinGeneSymbol[ , -c(5:185)]
+```
+
+
+```{r}
+kMEcols <- grep("^Z.kME.meta", colnames(info), value = TRUE)
+
+hubTable <- do.call(rbind, lapply(kMEcols, function(colname) {
+
+  ME <- sub("^Z.kME.meta.", "", colname)
+
+  # extract numeric ME index (ME1 -> 1)
+  MEidx <- as.numeric(sub("^ME", "", ME))
+
+  # genes assigned to this module by clustering
+  genesInModule <- info$ModuleLabel == MEidx
+
+  if (!any(genesInModule)) return(NULL)
+
+  zvals <- as.numeric(info[[colname]])
+
+  info[genesInModule, ][
+    which.max(abs(zvals[genesInModule])),
+  ]
+}))
+
+```
+
+
+```{r}
+#split function
+library(enrichR)
+modulecolors_split <- split(joinGeneSymbol, joinGeneSymbol$ModuleColor)
+
+
+# Assuming you have a list of module colors and their corresponding data frames
+#module_colors <- c('red', 'blue', 'green', ...)  # Add other module colors as needed
+#module_data_frames <- list(red = redmodule, blue = bluemodule, green = greenmodule, ...)  # Replace with actual data frames for other modules
+
+# Create a function to perform enrichment analysis and save the results
+perform_enrichment <- function(module_color, module_data) {
+  enriched_data <- enrichR::enrichr(
+    module_data$external_gene_name,
+    c('GO_Biological_Process_2023', 'GO_Cellular_Component_2023', 'GO_Molecular_Function_2023', 'KEGG_2021_Human')
+  )
+  file_path <- sprintf("/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/GO_terms/%s_excel.xlsx", module_color)
+  openxlsx::write.xlsx(enriched_data, file_path)
+}
+
+# Loop through each module color and perform enrichment analysis
+for (color in names(modulecolors_split)) {
+  module_data <- modulecolors_split[[color]]
+  perform_enrichment(color, module_data)
+}
+```
+
+
+```{r}
+#split function
+library(enrichR)
+modulecolors_split <- split(joinGeneSymbol, joinGeneSymbol$ModuleColor)
+
+
+# Assuming you have a list of module colors and their corresponding data frames
+#module_colors <- c('red', 'blue', 'green', ...)  # Add other module colors as needed
+#module_data_frames <- list(red = redmodule, blue = bluemodule, green = greenmodule, ...)  # Replace with actual data frames for other modules
+
+# Create a function to perform enrichment analysis and save the results
+perform_enrichment <- function(module_color, module_data) {
+  enriched_data <- enrichR::enrichr(
+    module_data$external_gene_name,
+    c('CellMarker_2024')
+  )
+  file_path <- sprintf("/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/CellMarkerEnrichments/%s_excel.xlsx", module_color)
+  openxlsx::write.xlsx(enriched_data, file_path)
+}
+
+# Loop through each module color and perform enrichment analysis
+for (color in names(modulecolors_split)) {
+  module_data <- modulecolors_split[[color]]
+  perform_enrichment(color, module_data)
+}
+
+```
+
+
+
+
+
+
+
+```{r}
+library(ggplot2)
+library(glue)
+library(tidyr)
+library(viridis)
+library(dplyr)
+library(readxl)
+```
+
+```{r}
+GOfiles <- "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/GO_terms/"
+
+#turquoise
+Turquoise <- read_excel(glue::glue("{GOfiles}/turquoise_excel.xlsx"), sheet = "KEGG_2021_Human")
+#Turquoise$KEGG <- "KEGG"
+Turquoise$Sample <- "Turquoise"
+
+#Green
+Green <- read_excel(glue::glue("{GOfiles}/green_excel.xlsx"), sheet = "KEGG_2021_Human")
+Green$Sample <- "Green"
+
+#Pink
+Pink <- read_excel(glue::glue("{GOfiles}/pink_excel.xlsx"), sheet = "KEGG_2021_Human")
+Pink$Sample <- "Pink"
+
+#Brown
+Brown <- read_excel(glue::glue("{GOfiles}/brown_excel.xlsx"), sheet = "KEGG_2021_Human")
+Brown$Sample <- "Brown"
+```
+
+```{r}
+GOdf <- rbind(Turquoise, Green, Pink, Brown)
+
+GOdf <- GOdf %>% 
+  dplyr::select(Sample, Term, Adjusted.P.value, Odds.Ratio) %>%
+  group_by(Sample) %>%
+  slice_min(order_by = Adjusted.P.value, n = 10)
+
+
+significantGO <- GOdf[GOdf$Adjusted.P.value < 0.05, ]
+```
+
+```{r}
+ggplot(significantGO,
+       aes(x = Term, y = Sample, color = Adjusted.P.value, size = Odds.Ratio)) +
+  geom_point() +
+  scale_size(range = c(2.5,12.5)) +
+  scale_color_viridis() +
+  xlab('') + ylab('Module') +
+  labs(
+    title = 'KEGG Terms of Modules Similar\nBetween Male and Female Placenta'
+  )  +   
+  theme_bw(base_size = 24) +
+  theme(
+    legend.position = 'right',
+    legend.background = element_rect(),
+    plot.title = element_text(angle = 0, size = 16, face = 'bold', vjust = 1, hjust = 0.5),
+    plot.subtitle = element_text(angle = 0, size = 14, face = 'bold', vjust = 1),
+    plot.caption = element_text(angle = 0, size = 12, face = 'bold', vjust = 1),
+    
+    axis.text.x = element_text(angle = 90, size = 16, face = 'bold', hjust = 1.0, vjust = 0.5),
+    axis.text.y = element_text(angle = 0, size = 14, face = 'bold', vjust = 0.5),
+    axis.title = element_text(size = 14, face = 'bold'),
+    axis.title.x = element_text(size = 16, face = 'bold'),
+    axis.title.y = element_text(size = 16, face = 'bold'),
+    axis.line = element_line(colour = 'black'),
+    
+    #Legend
+    legend.key = element_blank(), # removes the border
+    legend.key.size = unit(1, "cm"), # Sets overall area/size of the legend
+    legend.text = element_text(size = 14, face = "bold"), # Text size
+    title = element_text(size = 14, face = "bold")) +
+  coord_flip()
+```
+
+```{r}
+GOfiles <- "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/GO_terms/"
+
+
+Yellow <- read_excel(glue::glue("{GOfiles}/yellow_excel.xlsx"), sheet = "KEGG_2021_Human")
+#Turquoise$KEGG <- "KEGG"
+Yellow$Sample <- "Yellow"
+
+
+Lightyellow <- read_excel(glue::glue("{GOfiles}/lightyellow_excel.xlsx"), sheet = "KEGG_2021_Human")
+Lightyellow$Sample <- "Lightyellow"
+
+
+Blue <- read_excel(glue::glue("{GOfiles}/blue_excel.xlsx"), sheet = "KEGG_2021_Human")
+Blue$Sample <- "Blue"
+```
+
+```{r}
+GOdf <- rbind(Yellow, Lightyellow, Blue)
+
+GOdf <- GOdf %>% 
+  dplyr::select(Sample, Term, Adjusted.P.value, Odds.Ratio) %>%
+  group_by(Sample) %>%
+  slice_min(order_by = Adjusted.P.value, n = 10)
+
+
+significantGO <- GOdf[GOdf$Adjusted.P.value < 0.05, ]
+```
+
+```{r}
+ggplot(significantGO,
+       aes(x = Term, y = Sample, color = Adjusted.P.value, size = Odds.Ratio)) +
+  geom_point() +
+  scale_size(range = c(2.5,12.5)) +
+  scale_color_viridis() +
+  xlab('') + ylab('Module') +
+  labs(
+    title = 'KEGG Terms of Modules Different\nBetween Male and Female Placenta'
+  )  +   
+  theme_bw(base_size = 24) +
+  theme(
+    legend.position = 'right',
+    legend.background = element_rect(),
+    plot.title = element_text(angle = 0, size = 16, face = 'bold', vjust = 1, hjust = 0.5),
+    plot.subtitle = element_text(angle = 0, size = 14, face = 'bold', vjust = 1),
+    plot.caption = element_text(angle = 0, size = 12, face = 'bold', vjust = 1),
+    
+    axis.text.x = element_text(angle = 90, size = 16, face = 'bold', hjust = 1.0, vjust = 0.5),
+    axis.text.y = element_text(angle = 0, size = 14, face = 'bold', vjust = 0.5),
+    axis.title = element_text(size = 14, face = 'bold'),
+    axis.title.x = element_text(size = 16, face = 'bold'),
+    axis.title.y = element_text(size = 16, face = 'bold'),
+    axis.line = element_line(colour = 'black'),
+    
+    #Legend
+    legend.key = element_blank(), # removes the border
+    legend.key.size = unit(1, "cm"), # Sets overall area/size of the legend
+    legend.text = element_text(size = 14, face = "bold"), # Text size
+    title = element_text(size = 14, face = "bold")) +
+  coord_flip()
+```
+
+
+```{r}
+MEtrait <- traitData[c(1:6)]
+
+femaleMEtrait <- MEtrait %>% filter(PCBtraitData$Sex == "F")
+femaleMEtrait <- femaleMEtrait[-c(32:51),] #remove samples with Folate
+
+femaleME_blue_traits <- cbind(femaleMEtrait, MET[[1]]$data$MEblue)
+
+femaleME_blue_traits$PCB_dose <- as.factor(femaleME_blue_traits$PCB_dose)
+
+
+ggplotPCBEffect_blue <- ggplot(data = femaleME_blue_traits, aes(x = PCB_dose, y = MET[[1]]$data$MEblue, color = PCB_dose)) + geom_boxplot() + geom_point() + ggtitle("PCB Dosage Effect in Female Brain: Eigengene Values in blue Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+                                     
+ggplotPCBEffect_blue + theme(text = element_text(size = 10)) + geom_point(size=2) + ylim(-0.4, 0.4) + theme_bw()
+
+#theme_classic
+```
+
+
+
+
+```{r}
+MEtrait <- read_excel("/Users/kchau/Documents/PEBBLES/sampletraits/sample_info_restored_M_F_Placenta_copy_combinations.xlsx")
+MEtrait <- MEtrait[-c(2,4,5,6,7,8,9)]
+
+MEtrait <- MEtrait[-c(59:96),] #remove samples with Folate
+
+femaleMEtrait <- MEtrait %>% filter(MEtrait$Sex == "F")
+
+
+femaleME_blue_traits <- cbind(femaleMEtrait, MET[[1]]$data$MEblue)
+
+femaleME_blue_traits$PCB_dose <- as.factor(femaleME_blue_traits$PCB_dose)
+
+
+ggplotPCBEffect_blue <- ggplot(data = femaleME_blue_traits, aes(x = PCB_dose, y = MET[[1]]$data$MEblue, color = PCB_dose)) + geom_boxplot(lwd = 1.1) + geom_point() + ggtitle("Female Placenta: Eigengene Values\n in Blue Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+                                     
+ggplotPCBEffect_blue + geom_point(size=3) + ylim(-0.5, 0.5) + theme_classic() + theme(text = element_text(size=18,face="bold")) + theme(axis.text=element_text(size=20, face = "bold"), axis.title=element_text(size=20,face="bold")) + theme(plot.title = element_text(face="bold")) + theme(plot.title = element_text(size=22)) + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.position="none")
+
+```
+
+
+```{r}
+maleMEtrait <- MEtrait %>% filter(MEtrait$Sex == "M")
+
+maleME_blue_traits <- cbind(maleMEtrait, MET[[2]]$data$MEblue)
+
+maleME_blue_traits$PCB_dose <- as.factor(maleME_blue_traits$PCB_dose)
+
+
+ggplotPCBEffect_blue_male <- ggplot(data = maleME_blue_traits, aes(x = PCB_dose, y = MET[[2]]$data$MEblue, color = PCB_dose)) + geom_boxplot(lwd = 1.1) + geom_point() + ggtitle("Male Placenta: Eigengene Values\n in Blue Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+                                     
+ggplotPCBEffect_blue_male + geom_point(size=3) + ylim(-0.5, 0.5) + theme_classic() + theme(text = element_text(size=18, face="bold")) + theme(axis.text=element_text(size=20, face = "bold"), axis.title=element_text(size=20,face="bold")) + theme(plot.title = element_text(face="bold")) + theme(plot.title = element_text(size=22)) + theme(plot.title = element_text(hjust = 0.5)) + theme(legend.position="none")
+
+```
+
+```{r}
+save(list = ls(.GlobalEnv), file = "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/Renv.Rdata")
+```
+
+
+```{r}
+femaleME_cyan_traits <- cbind(femaleMEtrait, MET[[1]]$data$MEcyan)
+
+femaleME_cyan_traits$PCB_dose <- as.factor(femaleME_cyan_traits$PCB_dose)
+
+
+ggplotPCBEffect_cyan <- ggplot(data = femaleME_cyan_traits, aes(x = PCB_dose, y = MET[[1]]$data$MEcyan, color = PCB_dose)) + geom_boxplot() + geom_point() + ggtitle("PCB Dosage Effect in Female Brain: Eigengene Values in Cyan Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+                                     
+ggplotPCBEffect_cyan + geom_point(size=3) + ylim(-0.3, 0.4) + theme_classic() + theme(text = element_text(size=11)) + theme(axis.text=element_text(size=12, face = "bold"), axis.title=element_text(size=14,face="bold")) + theme(plot.title = element_text(face="bold"))
+```
+
+```{r}
+maleME_cyan_traits <- cbind(maleMEtrait, MET[[2]]$data$MEcyan)
+
+maleME_cyan_traits$PCB_dose <- as.factor(maleME_cyan_traits$PCB_dose)
+
+
+ggplotPCBEffect_cyan_male <- ggplot(data = maleME_cyan_traits, aes(x = PCB_dose, y = MET[[2]]$data$MEcyan, color = PCB_dose)) + geom_boxplot() + geom_point() + ggtitle("PCB Dosage Effect in Male Brain: Eigengene Values in Cyan Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+                                     
+ggplotPCBEffect_cyan_male + geom_point(size=3) + ylim(-0.3, 0.4) + theme_classic() + theme(text = element_text(size=11)) + theme(axis.text=element_text(size=12, face = "bold"), axis.title=element_text(size=14,face="bold")) + theme(plot.title = element_text(face="bold"))
+```
+
+```{r}
+ConSex_Placentas_PCB_genes_in_module <- joinGeneSymbol[ , c(4, 6)]
+library(dplyr)
+library(tidyr)
+library(data.table)
+
+ConSex_Placentas_PCB_genes_in_module <- distinct(ConSex_Placentas_PCB_genes_in_module) %>% 
+  mutate(rn = rowid(ModuleColor)) %>%
+  pivot_wider(names_from = rn, values_from = external_gene_name, 
+    names_sep = "", values_fill = "")
+    
+library(tidyverse)
+
+ConSex_Placentas_PCB_genes_in_module <- ConSex_Placentas_PCB_genes_in_module %>% 
+  column_to_rownames(var = "ModuleColor")   
+  
+ConSex_Placentas_PCB_genes_in_module <- t(ConSex_Placentas_PCB_genes_in_module)
+    
+ConSex_Placentas_PCB_genes_in_module <- as.data.frame(ConSex_Placentas_PCB_genes_in_module)
+
+
+
+writexl::write_xlsx(ConSex_Placentas_PCB_genes_in_module, "/Users/kchau/Documents/WGCNA/ConsensusPlacentaComparisonPCBonly/ConSex_Placentas_PCB_genes_in_module.xlsx")
+
+```

@@ -1,0 +1,1077 @@
+---
+title: "ConsensusBrainEnrichRComparisons"
+output: html_document
+date: "2023-05-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(WGCNA)
+library(readxl)
+#took out samples that had Folic Acid
+F_Brain <- read_excel("/Users/kchau/Documents/PEBBLES/RNA-seq_ComparisonBrain_PCBonly/F_Brain_voom_PCBonly.xlsx")
+F_Brain <- F_Brain[!grepl("PLAC", colnames(F_Brain))]
+
+M_Brain <- read_excel("/Users/kchau/Documents/PEBBLES/RNA-seq_ComparisonBrain_PCBonly/M_Brain_voom_PCBonly.xlsx")
+M_Brain <- M_Brain[!grepl("PLAC", colnames(M_Brain))]
+
+# Take a quick look at what is in the data sets (caution, longish output):
+dim(F_Brain)
+names(F_Brain)
+dim(M_Brain)
+names(M_Brain)
+```
+
+
+```{r}
+intersectedgenes <- intersect(rownames(F_Brain), rownames(M_Brain))
+F_Brain1 <- F_Brain[intersectedgenes, ]
+M_Brain1 <- M_Brain[intersectedgenes, ]
+```
+
+
+```{r}
+# We work with two sets:
+nSets = 2;
+# For easier labeling of plots, create a vector holding descriptive names of the two sets.
+setLabels = c("Female brain", "Male brain")
+shortLabels = c("Female", "Male")
+# Form multi-set expression data: columns starting from 9 contain actual expression data.
+multiExpr = vector(mode = "list", length = nSets)
+multiExpr[[1]] = list(data = as.data.frame(t(F_Brain1[-c(1:1)])));
+names(multiExpr[[1]]$data) = F_Brain1$Gene;
+rownames(multiExpr[[1]]$data) = names(F_Brain1)[-c(1:1)];
+multiExpr[[2]] = list(data = as.data.frame(t(M_Brain1[-c(1:1)])));
+names(multiExpr[[2]]$data) = M_Brain1$Gene;
+rownames(multiExpr[[2]]$data) = names(M_Brain1)[-c(1:1)];
+```
+
+
+```{r}
+# Check that the data has the correct format for many functions operating on multiple sets:
+exprSize = checkSets(multiExpr)
+```
+
+```{r}
+# Check that all genes and samples have sufficiently low numbers of missing values.
+gsg = goodSamplesGenesMS(multiExpr, verbose = 3);
+gsg$allOK
+```
+
+```{r}
+if (!gsg$allOK)
+{
+# Print information about the removed genes:
+if (sum(!gsg$goodGenes) > 0)
+printFlush(paste("Removing genes:", paste(names(multiExpr[[1]]$data)[!gsg$goodGenes],
+collapse = ", ")))
+for (set in 1:exprSize$nSets)
+{
+
+if (sum(!gsg$goodSamples[[set]]))
+printFlush(paste("In set", setLabels[set], "removing samples",
+paste(rownames(multiExpr[[set]]$data)[!gsg$goodSamples[[set]]], collapse = ", ")))
+# Remove the offending genes and samples
+multiExpr[[set]]$data = multiExpr[[set]]$data[gsg$goodSamples[[set]], gsg$goodGenes];
+}
+# Update exprSize
+exprSize = checkSets(multiExpr)
+}
+```
+
+
+```{r}
+sampleTrees = list()
+for (set in 1:nSets)
+{
+sampleTrees[[set]] = hclust(dist(multiExpr[[set]]$data), method = "average")
+}
+```
+
+```{r}
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/SamplesClustering.pdf", width = 12, height = 12);
+par(mfrow=c(2,1))
+par(mar = c(0, 4, 2, 0))
+for (set in 1:nSets)
+plot(sampleTrees[[set]], main = paste("Sample clustering on all genes in", setLabels[set]),
+xlab="", sub="", cex = 0.7);
+dev.off()
+```
+
+
+```{r}
+# Choose the "base" cut height for the female data set
+baseHeight = 60
+# Adjust the cut height for the male data set for the number of samples
+cutHeights = c(60, 60*exprSize$nSamples[2]/exprSize$nSamples[1]);
+#cutHeights = c(60, 100);
+# Re-plot the dendrograms including the cut lines
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/SamplesClusteringCutoff.pdf", width = 12, height = 12);
+par(mfrow=c(2,1))
+par(mar = c(0, 4, 2, 0))
+for (set in 1:nSets)
+{
+plot(sampleTrees[[set]], main = paste("Sample clustering on all genes in", setLabels[set]),
+xlab="", sub="", cex = 0.7);
+abline(h=cutHeights[set], col = "red");
+}
+dev.off()
+```
+
+```{r}
+#outlier removal
+for (set in 1:nSets)
+{
+   #Find clusters cut by the line
+   labels = cutreeStatic(sampleTrees[[set]], cutHeight = cutHeights[set], minSize = 10)
+   #Keep the largest one (labeled by the number 1)
+   keep = (labels==1)
+   multiExpr[[set]]$data = multiExpr[[set]]$data[keep, ]
+ }
+ 
+ labels1 <- cutreeStatic(sampleTrees[[1]], cutHeight = 60)
+ labels2 <- cutreeStatic(sampleTrees[[2]], cutHeight = 100, minSize = 10)
+```
+
+```{r}
+collectGarbage();
+# Check the size of the leftover data
+exprSize = checkSets(multiExpr)
+exprSize
+```
+
+
+```{r}
+PCBtraitData = read_excel("/Users/kchau/Documents/PEBBLES/sampletraits/M_F_Brains copy_combinations_PCB_only.xls")
+#FAtraitData = read_excel("/Users/kchau/Documents/PEBBLES/RNA-seq/RawData/FolicAcidM_F_Brainscopy_combinations.xls")
+#traitData <- traitData[-c(97:999),]
+PCBtraitData <- PCBtraitData[!grepl("PLAC", PCBtraitData$Name),]
+dim(PCBtraitData)
+names(PCBtraitData)
+```
+
+```{r}
+#allTraits = traitData[, c(1, 5, 7, 8)]
+PCBallTraits = PCBtraitData[, -c(2,3,4, 6)]
+PCBallTraits = PCBallTraits[-c(59:96),] #remove samples that had Folic Acid added
+#FAallTraits = FAtraitData[, -c(6)]
+#allTraits = PCBtraitData[, -c(4)]
+#allTraits = traitData
+# See how big the traits are and what are the trait and sample names
+dim(PCBallTraits)
+names(PCBallTraits)
+PCBallTraits$Name
+```
+
+```{r}
+#allTraits$Folic_Acid <- as.integer(as.factor(allTraits$Folic_Acid))
+#library(plyr)
+#FAallTraits$Folic_Acid <- revalue(FAallTraits$Folic_Acid, c("YES"=1))
+#FAallTraits$Folic_Acid <- revalue(FAallTraits$Folic_Acid, c("NO"=0))
+#allTraits$Sex <- revalue(allTraits$Sex, c("F"=0))
+#allTraits$Sex <- revalue(allTraits$Sex, c("M"=1))
+```
+
+
+```{r}
+#remove female brain outlier: 36_01; there are no male brain outliers
+#allTraits <- allTraits[!grepl("35_05_BRAIN", allTraits$Name), ]
+#allTraits <- allTraits[!grepl("35_06_BRAIN", allTraits$Name), ]
+#PCBallTraits <- PCBallTraits[!grepl("36_01_BRAIN", PCBallTraits$Name), ]
+#FAallTraits <- FAallTraits[!grepl("36_01_BRAIN", FAallTraits$Name), ]
+```
+
+```{r}
+PCBallTraits <- PCBallTraits[ , -c(2, 4)]
+```
+
+
+
+```{r}
+#PCB
+# Form a multi-set structure that will hold the sample traits.
+PCBTraits = vector(mode="list", length = nSets);
+for (set in 1:nSets)
+{
+PCBsetSamples = rownames(multiExpr[[set]]$data);
+PCBtraitRows = match(PCBsetSamples, PCBallTraits$Name);
+PCBTraits[[set]] = list(data = PCBallTraits[PCBtraitRows, -1]);
+rownames(PCBTraits[[set]]$data) = as.data.frame(PCBallTraits)[PCBtraitRows, 1]
+#rownames(PCBTraits[[set]]$data) = as.data.frame(PCBallTraits)[PCBtraitRows, 1];
+}
+collectGarbage();
+# Define data set dimensions
+PCBnGenes = exprSize$nGenes;
+PCBnSamples = exprSize$nSamples;
+```
+
+
+```{r}
+# Choose a set of soft-thresholding powers
+powers = c(seq(4,10,by=1), seq(12,40, by=2));
+# Initialize a list to hold the results of scale-free analysis
+powerTables = vector(mode = "list", length = nSets);
+# Call the network topology analysis function for each set in turn
+for (set in 1:nSets)
+powerTables[[set]] = list(data = pickSoftThreshold(multiExpr[[set]]$data, powerVector=powers,
+verbose = 2)[[2]]);
+collectGarbage();
+# Plot the results:
+colors = c("black", "red")
+# Will plot these columns of the returned scale free analysis tables
+plotCols = c(2,5,6,7)
+colNames = c("Scale Free Topology Model Fit", "Mean connectivity", "Median connectivity",
+"Max connectivity");
+# Get the minima and maxima of the plotted points
+ylim = matrix(NA, nrow = 2, ncol = 4);
+for (set in 1:nSets)
+{
+for (col in 1:length(plotCols))
+
+{
+ylim[1, col] = min(ylim[1, col], powerTables[[set]]$data[, plotCols[col]], na.rm = TRUE);
+ylim[2, col] = max(ylim[2, col], powerTables[[set]]$data[, plotCols[col]], na.rm = TRUE);
+}
+}
+# Plot the quantities in the chosen columns vs. the soft thresholding power
+sizeGrWindow(8, 6)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/scaleFreeAnalysis.pdf", wi = 8, he = 6)
+par(mfcol = c(2,2));
+par(mar = c(4.2, 4.2 , 2.2, 0.5))
+cex1 = 0.7;
+for (col in 1:length(plotCols)) for (set in 1:nSets)
+{
+if (set==1)
+{
+plot(powerTables[[set]]$data[,1], -sign(powerTables[[set]]$data[,3])*powerTables[[set]]$data[,2],
+xlab="Soft Threshold (power)",ylab=colNames[col],type="n", ylim = ylim[, col],
+main = colNames[col]);
+addGrid();
+}
+if (col==1)
+{
+text(powerTables[[set]]$data[,1], -sign(powerTables[[set]]$data[,3])*powerTables[[set]]$data[,2],
+labels=powers,cex=cex1,col=colors[set]);
+} else
+text(powerTables[[set]]$data[,1], powerTables[[set]]$data[,plotCols[col]],
+labels=powers,cex=cex1,col=colors[set]);
+if (col==1)
+{
+legend("bottomright", legend = setLabels, col = colors, pch = 20) ;
+} else
+legend("topright", legend = setLabels, col = colors, pch = 20) ;
+}
+dev.off();
+```
+
+
+#increase minModuleSize to minimize number of modules
+```{r}
+#change back to 50 min module size
+bnet = blockwiseConsensusModules(
+multiExpr, maxBlockSize = PCBnGenes, power = 22, minModuleSize = 50,
+networkType = "signed",
+TOMType = "signed",
+deepSplit = 2,
+pamRespectsDendro = FALSE,
+mergeCutHeight = 0.25, numericLabels = TRUE,
+minKMEtoStay = 0,
+saveTOMs = TRUE, verbose = 5)
+```
+
+
+
+```{r}
+PCBconsMEs = bnet$multiMEs;
+PCBmoduleLabels = bnet$colors;
+# Convert the numeric labels to color labels
+PCBmoduleColors = labels2colors(PCBmoduleLabels)
+PCBconsTree = bnet$dendrograms[[1]]
+```
+
+
+```{r}
+sizeGrWindow(12,6)
+
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/PCBBlockwiseGeneDendrosAndColors.pdf", wi = 12, he = 6);
+# Use the layout function for more involved screen sectioning
+layout(matrix(c(1:4), 2, 2), heights = c(0.8, 0.2), widths = c(1,1))
+#layout.show(4);
+nBlocks = length(bnet$dendrograms)
+# Plot the dendrogram and the module colors underneath for each block
+for (block in 1:nBlocks)
+plotDendroAndColors(bnet$dendrograms[[block]], PCBmoduleColors[bnet$blockGenes[[block]]],
+"Module colors",
+main = paste("Consensus Brain Gene dendrogram and module colors in block", block),
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05,
+setLayout = FALSE)
+dev.off()
+```
+
+
+
+```{r}
+#find number of modules
+table(bnet$colors)
+```
+
+```{r}
+library(dplyr)
+PCBTraits[[set]]$data <- PCBTraits[[set]]$data %>% 
+    dplyr::select(-Sex, -LitterCoded)
+```
+
+```{r}
+# Set up variables to contain the module-trait correlations
+PCBmoduleTraitCor = list();
+PCBmoduleTraitPvalue = list();
+# Calculate the correlations
+for (set in 1:nSets)
+{
+PCBmoduleTraitCor[[set]] = cor(PCBconsMEs[[set]]$data, PCBTraits[[set]]$data, use = "p", method = 'spearman');
+PCBmoduleTraitPvalue[[set]] = corPvalueFisher(PCBmoduleTraitCor[[set]], exprSize$nSamples[set])
+}
+```
+
+
+```{r}
+# Convert numerical lables to colors for labeling of modules in the plot
+PCBMEColors = labels2colors(as.numeric(substring(names(PCBconsMEs[[1]]$data), 3)));
+PCBMEColorNames = paste("ME", PCBMEColors, sep="");
+# Open a suitably sized window (the user should change the window size if necessary)
+sizeGrWindow(10,7)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/hublitterConsensusModuleTraitRelationships-PCBfemale.pdf", wi = 12, he = 9);
+# Plot the module-trait relationship table for set number 1
+set = 1
+textMatrix = paste(signif(PCBmoduleTraitCor[[set]], 2), "\n(",
+signif(PCBmoduleTraitPvalue[[set]], 1), ")", sep = "");
+dim(textMatrix) = dim(PCBmoduleTraitCor[[set]])
+par(mar = c(6, 8.8, 3, 2.2));
+labeledHeatmap(Matrix = PCBmoduleTraitCor[[set]],
+xLabels = names(PCBTraits[[set]]$data),
+yLabels = PCBMEColorNames,
+ySymbols = PCBMEColorNames,
+colorLabels = FALSE,
+colors = greenWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.7,
+zlim = c(-1,1),
+main = paste("ConsensusModule PCB trait relationships in", setLabels[set]))
+dev.off();
+# Plot the module-trait relationship table for set number 2
+set = 2
+textMatrix = paste(signif(PCBmoduleTraitCor[[set]], 2), "\n(",
+signif(PCBmoduleTraitPvalue[[set]], 1), ")", sep = "");
+dim(textMatrix) = dim(PCBmoduleTraitCor[[set]])
+sizeGrWindow(10,7)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/hublitterConsensusModuleTraitRelationships-PCBmale.pdf", wi = 12, he = 9);
+par(mar = c(6, 8.8, 3, 2.2));
+labeledHeatmap(Matrix = PCBmoduleTraitCor[[set]],
+xLabels = names(PCBTraits[[set]]$data),
+yLabels = PCBMEColorNames,
+ySymbols = PCBMEColorNames,
+colorLabels = FALSE,
+colors = greenWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.7,
+zlim = c(-1,1),
+main = paste("ConsensusModule PCB Trait Relationships in", setLabels[set]))
+dev.off()
+```
+
+
+```{r}
+# Initialize matrices to hold the consensus correlation and p-value
+PCBconsensusCor = matrix(NA, nrow(PCBmoduleTraitCor[[1]]), ncol(PCBmoduleTraitCor[[1]]));
+PCBconsensusPvalue = matrix(NA, nrow(PCBmoduleTraitCor[[1]]), ncol(PCBmoduleTraitCor[[1]]));
+# Find consensus negative correlations
+PCBnegative = PCBmoduleTraitCor[[1]] < 0 & PCBmoduleTraitCor[[2]] < 0;
+PCBconsensusCor[PCBnegative] = pmax(PCBmoduleTraitCor[[1]][PCBnegative], PCBmoduleTraitCor[[2]][PCBnegative]);
+PCBconsensusPvalue[PCBnegative] = pmax(PCBmoduleTraitPvalue[[1]][PCBnegative], PCBmoduleTraitPvalue[[2]][PCBnegative]);
+# Find consensus positive correlations
+PCBpositive = PCBmoduleTraitCor[[1]] > 0 & PCBmoduleTraitCor[[2]] > 0;
+PCBconsensusCor[PCBpositive] = pmin(PCBmoduleTraitCor[[1]][PCBpositive], PCBmoduleTraitCor[[2]][PCBpositive]);
+PCBconsensusPvalue[PCBpositive] = pmax(PCBmoduleTraitPvalue[[1]][PCBpositive], PCBmoduleTraitPvalue[[2]][PCBpositive])
+```
+
+```{r}
+textMatrix = paste(signif(PCBconsensusCor, 2), "\n(",
+signif(PCBconsensusPvalue, 1), ")", sep = "");
+dim(textMatrix) = dim(PCBmoduleTraitCor[[set]])
+sizeGrWindow(10,7)
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/ModuleTraitRelationships-PCBconsensus.pdf", wi = 12, he = 9);
+par(mar = c(6, 8.8, 3, 2.2));
+labeledHeatmap(Matrix = PCBconsensusCor,
+xLabels = names(PCBTraits[[set]]$data),
+yLabels = PCBMEColorNames,
+ySymbols = PCBMEColorNames,
+colorLabels = FALSE,
+colors = greenWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.7,
+zlim = c(-1,1),
+main = paste("Consensus module PCB trait relationships across\n",
+paste(setLabels, collapse = " and ")))
+```
+
+
+
+```{r}
+# Create a variable weight that will hold just the body weight of mice in both sets
+PCBDose = vector(mode = "list", length = nSets);
+for (set in 1:nSets)
+{
+PCBDose[[set]] = list(data = as.data.frame(PCBTraits[[set]]$data$PCB_dose));
+names(PCBDose[[set]]$data) = "PCB Dose"
+}
+# Recalculate consMEs to give them color names
+consMEsC = multiSetMEs(multiExpr, universalColors = PCBmoduleColors);
+# We add the weight trait to the eigengenes and order them by consesus hierarchical clustering:
+MET = consensusOrderMEs(addTraitToMEs(consMEsC, PCBDose))
+```
+
+```{r}
+sizeGrWindow(8,10);
+pdf(file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/PCBEigengeneNetworks.pdf", width= 10, height = 12);
+par(cex = 0.9)
+plotEigengeneNetworks(MET, setLabels, marDendro = c(0,2,2,1), marHeatmap = c(3,3,2,1),
+zlimPreservation = c(0.5, 1), xLabelsAngle = 90)
+dev.off()
+```
+
+
+#HUB GENE
+
+```{r}
+hub <- chooseTopHubInEachModule(
+   datExpr, 
+   bnet$colors, 
+   omitColors = "grey", 
+   power = 2, 
+   type = "signed")
+```
+
+```{r}
+moduleLookup <- data.frame(
+  ModuleNumber = sort(unique(bnet$colors)),
+  ModuleColor  = labels2colors(sort(unique(bnet$colors)))
+)
+
+moduleLookup
+```
+
+```{r}
+hub_df <- data.frame(
+  ModuleNumber = as.numeric(names(hub)),
+  HubGene      = unname(hub)
+)
+
+hub_df <- merge(hub_df, moduleLookup, by = "ModuleNumber")
+```
+
+```{r}
+?chooseOneHubInEachModule
+```
+
+
+```{r}
+Onehubgene <- chooseOneHubInEachModule(
+   datExpr, 
+   bnet$colors,  
+   numGenes = 100, 
+   omitColors = "grey", 
+   power = 2, 
+   type = "signed")
+
+```
+
+```{r}
+onehubmoduleLookup <- data.frame(
+  ModuleNumber = sort(unique(bnet$colors)),
+  ModuleColor  = labels2colors(sort(unique(bnet$colors)))
+)
+
+onehubmoduleLookup
+```
+
+```{r}
+onehub_df <- data.frame(
+  ModuleNumber = as.numeric(names(Onehubgene)),
+  HubGene      = unname(Onehubgene)
+)
+
+onehub_df <- merge(onehub_df, onehubmoduleLookup, by = "ModuleNumber")
+```
+
+
+
+```{r}
+library(biomaRt)
+
+ensembl <- useEnsembl(
+  biomart = "genes",
+  dataset = "mmusculus_gene_ensembl",
+  mirror  = "useast"
+)
+
+annot <- getBM(
+  attributes = c("ensembl_gene_id", "mgi_symbol"),
+  filters    = "ensembl_gene_id",
+  values     = hub_df$HubGene,
+  mart       = ensembl
+)
+
+hub_df <- merge(
+  hub_df,
+  annot,
+  by.x = "HubGene",
+  by.y = "ensembl_gene_id",
+  all.x = TRUE
+)
+
+```
+
+```{r}
+
+ensembl <- useEnsembl(
+  biomart = "genes",
+  dataset = "mmusculus_gene_ensembl",
+  mirror  = "useast"
+)
+
+annot <- getBM(
+  attributes = c("ensembl_gene_id", "mgi_symbol"),
+  filters    = "ensembl_gene_id",
+  values     = onehub_df$HubGene,
+  mart       = ensembl
+)
+
+onehub_df <- merge(
+  onehub_df,
+  annot,
+  by.x = "HubGene",
+  by.y = "ensembl_gene_id",
+  all.x = TRUE
+)
+
+```
+
+```{r}
+hub_kME <- sapply(colnames(MEs), function(ME) {
+  module <- sub("^ME", "", ME)          # e.g. "blue"
+  genesInModule <- moduleColors == module
+  
+  rownames(kME)[genesInModule][
+    which.max(abs(kME[genesInModule, ME]))
+  ]
+})
+```
+
+```{r}
+MET <- consensusModuleEigengenes(
+  multiExpr,
+  colors = moduleColors,
+  excludeGrey = TRUE
+)$eigengenes
+```
+
+```{r}
+consensusColors <- bnet$colors
+moduleColors <- consensusColors
+moduleColors <- labels2colors(moduleColors)
+
+nSets <- length(multiExpr)
+
+colorsMat <- matrix(
+  moduleColors,
+  nrow = length(moduleColors),
+  ncol = nSets
+)
+
+colnames(colorsMat) <- paste0("set", 1:nSets)
+
+colorsList <- list(
+  moduleColors,
+  moduleColors
+)
+
+
+MET <- multiSetMEs(
+  multiExpr,
+  colors = moduleColors,
+  excludeGrey = TRUE
+)
+```
+
+
+```{r}
+datExpr <- multiExpr[[1]]$data
+kMEtable <- signedKME(multiExpr, MET)
+
+```
+
+
+```{r}
+kME1 <- kME[[1]]$cor
+kME2 <- kME[[2]]$cor
+
+moduleLabels <- as.numeric(factor(moduleColors))
+
+
+hubGenes <- sapply(colnames(kME1), function(ME) {
+
+  moduleLabel <- as.numeric(sub("^ME", "", ME))  # 1, 2, ...
+
+  genesInModule <- moduleLabels == moduleLabel
+  geneNames <- rownames(kME1)[genesInModule]
+
+  meanKME <- (abs(kME1[genesInModule, ME]) +
+              abs(kME2[genesInModule, ME])) / 2
+
+  geneNames[which.max(meanKME)]
+})
+
+hubGenes
+```
+
+
+
+
+
+```{r}
+library("AnnotationDbi")
+library("org.Mm.eg.db")
+#columns(org.Mm.eg.db) # returns list of available keytypes
+F_Brain1$entrez = mapIds(org.Mm.eg.db,
+                    keys=F_Brain1$Gene, #Column containing Ensembl gene ids
+                    column="ENTREZID",
+                    keytype="ENSEMBL",
+                    multiVals="first")
+```
+
+
+
+```{r}
+#columns(org.Mm.eg.db) # returns list of available keytypes
+M_Brain1$entrez = mapIds(org.Mm.eg.db,
+                    keys=M_Brain1$Gene, #Column containing Ensembl gene ids
+                    column="ENTREZID",
+                    keytype="ENSEMBL",
+                    multiVals="first")
+```
+
+
+```{r}
+#GO Terms Female Brain
+GOenrFemaleBrain = GOenrichmentAnalysis(PCBmoduleColors, F_Brain1$entrez, organism = "mouse", evidence = "all", nBestP = 10)
+
+#GO Terms Male Brain
+GOenrMaleBrain = GOenrichmentAnalysis(PCBmoduleColors, M_Brain1$entrez, organism = "mouse", evidence = "all", nBestP = 10)
+```
+
+
+
+```{r}
+tabFemaleBrain = GOenrFemaleBrain$bestPTerms[[4]]$enrichment
+tabMaleBrain = GOenrMaleBrain$bestPTerms[[4]]$enrichment
+```
+
+```{r}
+write.table(tabFemaleBrain, file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/ConsensusFemaleBrainGOEnrichmentTable.csv", sep = ",", quote = TRUE, row.names = FALSE)
+
+write.table(tabMaleBrain, file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/ConsensusMaleBrainGOEnrichmentTable.csv", sep = ",", quote = TRUE, row.names = FALSE)
+```
+
+
+
+
+
+#For Consensus GO terms
+```{r}
+consMEs.unord = multiSetMEs(multiExpr, universalColors = PCBmoduleLabels, excludeGrey = TRUE)
+GS = list();
+kME = list();
+for (set in 1:nSets)
+{
+GS[[set]] = corAndPvalue(multiExpr[[set]]$data, PCBTraits[[set]]$data);
+kME[[set]] = corAndPvalue(multiExpr[[set]]$data, consMEs.unord[[set]]$data);
+}
+```
+
+```{r}
+GS.metaZ = (GS[[1]]$Z + GS[[2]]$Z)/sqrt(2);
+kME.metaZ = (kME[[1]]$Z + kME[[2]]$Z)/sqrt(2);
+GS.metaP = 2*pnorm(abs(GS.metaZ), lower.tail = FALSE);
+kME.metaP = 2*pnorm(abs(kME.metaZ), lower.tail = FALSE)
+```
+
+```{r}
+GSmat = rbind(GS[[1]]$cor, GS[[2]]$cor, GS[[1]]$p, GS[[2]]$p, GS.metaZ, GS.metaP);
+nTraits = checkSets(PCBTraits)$nGenes
+traitNames = colnames(PCBTraits[[1]]$data)
+dim(GSmat) = c(PCBnGenes, 6*nTraits)
+#rownames(GSmat) = probes;
+rownames(GSmat) = M_Brain1$Gene;
+colnames(GSmat) = spaste(
+c("GS.set1.", "GS.set2.", "p.GS.set1.", "p.GS.set2.", "Z.GS.meta.", "p.GS.meta"),
+rep(traitNames, rep(6, nTraits)))
+# Same code for kME:
+kMEmat = rbind(kME[[1]]$cor, kME[[2]]$cor, kME[[1]]$p, kME[[2]]$p, kME.metaZ, kME.metaP);
+MEnames = colnames(consMEs.unord[[1]]$data);
+nMEs = checkSets(consMEs.unord)$nGenes
+dim(kMEmat) = c(PCBnGenes, 6*nMEs)
+#rownames(kMEmat) = probes;
+rownames(kMEmat) = M_Brain1$Gene;
+colnames(kMEmat) = spaste(
+c("kME.set1.", "kME.set2.", "p.kME.set1.", "p.kME.set2.", "Z.kME.meta.", "p.kME.meta"),
+rep(MEnames, rep(6, nMEs)))
+```
+
+```{r}
+info = data.frame(Probe = M_Brain1$Gene, EntrezID = M_Brain1$entrez,
+ModuleLabel = PCBmoduleLabels,
+ModuleColor = labels2colors(PCBmoduleLabels), GSmat, kMEmat);
+write.csv(info, file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/testingbrain_consensusAnalysis-CombinedNetworkResults.csv",
+row.names = FALSE, quote = FALSE)
+```
+
+```{r}
+info <- read.csv("/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/testingbrain_consensusAnalysis-CombinedNetworkResults.csv")
+```
+
+
+```{r}
+hubTable <- do.call(rbind, lapply(sort(unique(info$ModuleLabel)), function(m) {
+
+  colname <- paste0("Z.kME.meta.ME", m)
+
+  # skip modules without eigengenes (e.g. grey)
+  if (!colname %in% colnames(info)) return(NULL)
+
+  sub <- info[info$ModuleLabel == m, ]
+
+  # force numeric (guards against factor/character conversion)
+  zvals <- as.numeric(sub[[colname]])
+
+  sub[which.max(abs(zvals)), ]
+}))
+
+```
+
+
+```{r}
+nrow(hubTable)
+length(unique(hubTable$ModuleLabel))
+any(hubTable$ModuleColor == "grey")
+```
+
+
+
+
+```{r}
+# kME1 is the correlation matrix: genes × MEs
+ME2color <- sapply(colnames(kME1), function(ME) {
+
+  # genes whose strongest membership is this ME
+  genesInModule <- apply(abs(kME1), 1, function(x)
+    colnames(kME1)[which.max(x)] == ME
+  )
+
+  # most common color among those genes
+  names(sort(table(moduleColors[genesInModule]), decreasing = TRUE))[1]
+})
+
+ME2color
+```
+
+
+
+```{r}
+info <- info[, c(1:4)]
+info$GeneSymbol <- 'NA'
+
+#Convert entrezID to gene symbols using biomart
+library(biomaRt)
+library(dplyr)
+library(xlsx)
+
+
+mart <- useDataset("mmusculus_gene_ensembl", useMart("ensembl"))
+#got the probe and gene symbol that matches
+geneSymbols <- getBM(filters = "ensembl_gene_id", attributes= c("ensembl_gene_id", "external_gene_name"), values=info$Probe, mart= mart)
+
+#join the dataframe with moduleinfo by Probe column
+joinGeneSymbol <- left_join(info, geneSymbols, by = c("Probe" = "ensembl_gene_id"))
+```
+
+
+```{r}
+#split function
+modulecolors_split <- split(joinGeneSymbol, joinGeneSymbol$ModuleColor)
+
+
+# Assuming you have a list of module colors and their corresponding data frames
+#module_colors <- c('red', 'blue', 'green', ...)  # Add other module colors as needed
+#module_data_frames <- list(red = redmodule, blue = bluemodule, green = greenmodule, ...)  # Replace with actual data frames for other modules
+
+# Create a function to perform enrichment analysis and save the results
+perform_enrichment <- function(module_color, module_data) {
+  enriched_data <- enrichR::enrichr(
+    module_data$external_gene_name,
+    c('GO_Biological_Process_2023', 'GO_Cellular_Component_2023', 'GO_Molecular_Function_2023')
+  )
+  file_path <- sprintf("/Users/kchau/Documents/WGCNA/ConsensusBrainComparisonPCBonly/GO_terms/%s_excel.xlsx", module_color)
+  openxlsx::write.xlsx(enriched_data, file_path)
+}
+
+# Loop through each module color and perform enrichment analysis
+for (color in names(modulecolors_split)) {
+  module_data <- modulecolors_split[[color]]
+  perform_enrichment(color, module_data)
+}
+```
+
+
+```{r}
+# Choose interesting modules
+intModules = c("MEbrown")
+for (module in intModules)
+{
+#Select module probes
+modGenes = (moduleColors==module)
+#Get their entrez ID codes
+modLLIDs = F_Brain1$entrez[modGenes];
+#Write them into a file
+fileName = paste("LocusLinkIDs-", module, ".txt", sep="");
+write.table(as.data.frame(modLLIDs), file = "/Users/kchau/Documents/WGCNA/ConsensusBrainComparison/outputgenelist",
+row.names = FALSE, col.names = FALSE)
+}
+```
+
+```{r}
+install.packages("onewaytests")
+library(onewaytests)
+bf.test()
+```
+
+```{r}
+MEtrait <- PCBtraitData[c(1:6)]
+
+femaleMEtrait <- MEtrait %>% filter(PCBtraitData$Sex == "F")
+femaleMEtrait <- femaleMEtrait[-c(32:51),] #remove samples with Folate
+
+femaleME_lightcyan_traits <- cbind(femaleMEtrait, MET[[1]]$data$MElightcyan)
+
+femaleME_lightcyan_traits$PCB_dose <- as.factor(femaleME_lightcyan_traits$PCB_dose)
+
+
+ggplotPCBEffect_lightcyan <- ggplot(data = femaleME_lightcyan_traits, aes(x = PCB_dose, y = MET[[1]]$data$MElightcyan, color = PCB_dose)) + geom_boxplot() + geom_point() + ggtitle("PCB Dosage Effect in Female Brain: Eigengene Values in Light Cyan Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+                                     
+ggplotPCBEffect_lightcyan + theme(text = element_text(size = 10)) + geom_point(size=2) + ylim(-0.4, 0.4)
+```
+
+```{r}
+MEtrait <- PCBtraitData[c(1:6)]
+
+maleMEtrait <- MEtrait %>% filter(PCBtraitData$Sex == "M")
+maleMEtrait <- maleMEtrait[-c(28:45),] #remove samples with Folate
+
+maleME_lightcyan_traits <- cbind(maleMEtrait, MET[[2]]$data$MElightcyan)
+
+maleME_lightcyan_traits$PCB_dose <- as.factor(maleME_lightcyan_traits$PCB_dose)
+
+
+ggplotPCBEffect_lightcyan_male <- ggplot(data = maleME_lightcyan_traits, aes(x = PCB_dose, y = MET[[2]]$data$MElightcyan, color = PCB_dose)) + geom_boxplot() + geom_point() + ggtitle("PCB Dosage Effect in Male Brain: Eigengene Values in Light Cyan Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+                                     
+ggplotPCBEffect_lightcyan_male + theme(text = element_text(size = 10)) + geom_point(size=2) + ylim(-0.4, 0.4)
+```
+
+
+
+
+
+
+
+
+
+```{r}
+ggplotTurquoise_male_new <- ggplot(data = MEturquoise_male, aes(x = FA_PCB, y = MET[[2]]$data$MEturquoise, color = FA_PCB)) + geom_boxplot() + geom_point() + ggtitle("Male Brain: Eigengene Values in Turquoise Module") + xlab("Treatment") + ylab("Module Eigengene Values")
+```
+
+
+
+
+```
+
+
+
+
+
+
+
+```{r}
+#make the female Module Eigengene Dataframe
+MEtrait <- traitData[c(1:4)]
+
+
+MEtrait <- MEtrait[c(1:6, 14:23, 29:37, 44:49, 59:68, 77:86), ] #filter out the males
+MEtrait <- subset(MEtrait, MEtrait$Name != '36_01_BRAIN') #remove the outlier in female samples
+```
+
+```{r}
+MEturquoiseandtraits <- cbind(MEtrait, MET[[1]]$data$MEturquoise)
+```
+
+```{r}
+summary(MEturquoiseandtraits$`MET[[1]]$data$MEturquoise`)
+```
+
+```{r}
+MEturquoiseandtraits$highorlowdose <- c(1:50)
+MEturquoiseandtraits$highorlowdose[1:16] <- "low_dose"
+MEturquoiseandtraits$highorlowdose[17:31] <- "high_dose"
+MEturquoiseandtraits$highorlowdose[32:50] <- "low_dose"
+```
+
+
+
+#want a boxplot separated by Yes Folic Acid (2 bars referring to 0 and 0.1 PCB) and No Folic Acid (2 bars reffering to 0 and 0.1 PCB dose)
+
+
+```{r}
+MEturquoiseandtraits$FA_PCB <- paste(MEturquoiseandtraits$Folic_Acid, MEturquoiseandtraits$PCB_dose, sep = "-")
+```
+
+```{r}
+MEturquoiseandtraits$FA_PCB <- as.factor(MEturquoiseandtraits$FA_PCB)
+#levels(MEturquoiseandtraits$FA_PCB) <- c("No FA, No PCB", "No FA, Yes PCB", "Yes FA, No PBC", "Yes FA, Yes PCB")
+```
+
+
+```{r}
+ggplotTurquoise_female_new <- ggplot(data = MEturquoiseandtraits, aes(x = FA_PCB, y = MET[[1]]$data$MEturquoise, color = FA_PCB)) + geom_boxplot() + geom_point() + ggtitle("Female Brain: Eigengene Values in Turquoise Module") + xlab("Treatment") + ylab("Module Eigengene Values")
+```
+
+```{r}
+ggplotTurquoise_female_new
+```
+
+1) red and blue paired together, yellow and pink together (Folate Effect)
+subset
+
+
+```{r}
+MEturquoise_female_folateeffect <- MEturquoiseandtraits[c(1:16, 32:50), ]
+
+MEturquoise_female_folateeffect$FA_PCB <- factor(MEturquoise_female_folateeffect$FA_PCB, levels=c("NO-0", "YES-0", "NO-0.1", "YES-0.1"))
+
+ggplotTurquoise_female_folateeffect <- ggplot(data = MEturquoise_female_folateeffect, aes(x = FA_PCB, y = MEturquoise_female_folateeffect$`MET[[1]]$data$MEturquoise`, color = FA_PCB)) + geom_boxplot() + geom_point() + ggtitle("Folate Effect in Female Brain: Eigengene Values in Turquoise Module") + xlab("Folic Acid - PCB Dose") + ylab("Module Eigengene Value")
+
+ggplotTurquoise_female_folateeffect
+
+
+
+
+```
+
+
+
+
+
+
+2) without folate (PCB dosage effect) #add color
+
+
+```{r}
+MEfolateeffect <- MEturquoiseandtraits
+MEfolateeffect <- MEturquoiseandtraits[1:31, ] #only include samples with no folate
+MEfolateeffect$PCB_dose <- as.character(MEfolateeffect$PCB_dose)
+
+ggplotFolateEffect <- ggplot(data = MEfolateeffect, aes(x = MEfolateeffect$FA, y = MEfolateeffect$`MET[[1]]$data$MEturquoise`, color = MEfolateeffect$PCB_dose)) + geom_boxplot() + geom_point() + ggtitle("PCB Dosage Effect in Female Brain: Eigengene Values in Turquoise Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+
+
+ggplotFolateEffect + theme(legend.position = "none")
+```
+
+
+#Plot Male 
+
+```{r}
+MEtrait_male <- traitData[c(1:4)]
+MEtrait_male <- MEtrait_male[c(7:13, 24:28, 38:43, 50:58, 69:76, 87:96), ] #filter out the females
+#filter out male outliers
+MEtrait_male <- subset(MEtrait_male, MEtrait_male$Name != '35_05_BRAIN') #remove the outlier in male samples
+MEtrait_male <- subset(MEtrait_male, MEtrait_male$Name != '35_06_BRAIN') #remove the outlier in male samples
+```
+
+
+```{r}
+MEturquoise_male <- cbind(MEtrait_male, MET[[2]]$data$MEturquoise)
+```
+
+
+```{r}
+MEturquoise_male$FA_PCB <- paste(MEturquoise_male$Folic_Acid, MEturquoise_male$PCB_dose, sep = "-")
+```
+
+```{r}
+MEturquoise_male$FA_PCB <- as.factor(MEturquoise_male$FA_PCB)
+#levels(MEturquoiseandtraits$FA_PCB) <- c("No FA, No PCB", "No FA, Yes PCB", "Yes FA, No PBC", "Yes FA, Yes PCB")
+```
+
+
+```{r}
+ggplotTurquoise_male_new <- ggplot(data = MEturquoise_male, aes(x = FA_PCB, y = MET[[2]]$data$MEturquoise, color = FA_PCB)) + geom_boxplot() + geom_point() + ggtitle("Male Brain: Eigengene Values in Turquoise Module") + xlab("Treatment") + ylab("Module Eigengene Values")
+```
+
+```{r}
+ggplotTurquoise_male_new
+```
+```{r}
+MEturquoise_male_folateeffect <- MEturquoise_male[c(1:12, 28:43), ]
+
+
+MEturquoise_male_folateeffect$FA_PCB <- factor(MEturquoise_male_folateeffect$FA_PCB, levels=c("NO-0", "YES-0", "NO-0.1", "YES-0.1"))
+
+ggplotTurquoise_male_folateeffect <- ggplot(data = MEturquoise_male_folateeffect, aes(x = FA_PCB, y = MEturquoise_male_folateeffect$`MET[[2]]$data$MEturquoise`, color = FA_PCB)) + geom_boxplot() + geom_point() + ggtitle("Folate Effect in Male Brain: Eigengene Values in Turquoise Module") + xlab("Folate - PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+
+ggplotTurquoise_male_folateeffect
+
+
+```
+
+
+
+
+
+
+
+
+
+1) red and blue paired together, yellow and pink together (Folate Effect)
+
+2) without folate (PCB dosage effect) #add color
+
+```{r}
+
+
+MEfolateeffect_male <- MEturquoise_male
+MEfolateeffect_male <- MEturquoise_male[1:27, ] #only include samples with no folate
+MEfolateeffect_male$FA_PCB <- MEfolateeffect_male$PCB_dose
+
+MEfolateeffect_male$PCB_dose <- as.character(MEfolateeffect_male$PCB_dose)
+
+ggplotFolateEffect_male <- ggplot(data = MEfolateeffect_male, aes(x = MEfolateeffect_male$PCB_dose, y = MEfolateeffect_male$`MET[[2]]$data$MEturquoise`, color = MEfolateeffect_male$PCB_dose)) + geom_boxplot() + geom_point()  + ggtitle("PCB Dosage Effect in Male Brain: Eigengene Values in Turquoise Module") + xlab("PCB Dose (mg/kg/day)") + ylab("Module Eigengene Value")
+
+
+ggplotFolateEffect_male + theme(legend.position = "none")
+```
+
